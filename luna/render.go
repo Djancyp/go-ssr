@@ -46,14 +46,14 @@ func (e *Engine) RenderFrontend(config RenderConfig) error {
 
 	}
 
-	// e.Cache = append(e.Cache, Cache{
-	// 	ID:   ID,
-	// 	Path: task.Path,
-	// 	HTML: html,
-	// 	Body: body,
-	// 	CSS:  css,
-	// 	JS:   js,
-	// })
+	e.Cache = append(e.Cache, Cache{
+		ID:   ID,
+		Path: task.Path,
+		HTML: html,
+		Body: body,
+		CSS:  css,
+		JS:   js,
+	})
 
 	return html.Execute(config.Ctx.Response().Writer,
 		map[string]interface{}{

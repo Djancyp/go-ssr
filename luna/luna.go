@@ -32,7 +32,6 @@ type Config struct {
 
 func New(config Config) (*Engine, error) {
 	server := echo.New()
-	server.Static("/*.svg", "frontend/src/assets/")
 	server.Static("/assets", "frontend/src/assets/")
 
 	server.Use(middleware.GzipWithConfig(middleware.GzipConfig{

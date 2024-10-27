@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"html/template"
+	"os"
 	"strings"
 
 	"github.com/buke/quickjs-go"
@@ -56,7 +57,7 @@ func (j *JobRunner) Start() (html *template.Template, body string, css string, j
 		j.Logger.Error().Err(err).Msg("failed to render html")
 		return nil, "", "", "", err
 	}
-	serverBody, err := renderReactToHTMLNew(serverJS.JS,j.Path)
+	serverBody, err := renderReactToHTMLNew(serverJS.JS, j.Path)
 	if err != nil {
 		j.Logger.Error().Err(err).Msg("failed to render react to html")
 		return nil, "", "", "", err
@@ -103,6 +104,7 @@ func BuildClient() (BuildResult, error) {
 	opt := esbuild.Build(esbuild.BuildOptions{
 		EntryPoints:       []string{"./frontend/src/entry-client.tsx"},
 		Outdir:            "/",
+		AssetNames:        fmt.Sprintf("%s/[name]", strings.TrimPrefix("/assets/", "/")),
 		Bundle:            true,
 		Write:             false,
 		Metafile:          false,
@@ -136,17 +138,17 @@ func BuildServer() (BuildResult, error) {
 		Bundle:            true,
 		Write:             false,
 		Outdir:            "/",
-		Format:            esbuild.FormatESModule,
+		Format:            esbuild.FormatESModule, // Use ES Module format
 		Platform:          esbuild.PlatformBrowser,
-		Target:            esbuild.ES2015,
+		Target:            esbuild.ES2020,
 		AssetNames:        fmt.Sprintf("%s/[name]", strings.TrimPrefix("/assets/", "/")),
-		MinifyWhitespace:  true,
-		MinifyIdentifiers: true,
-		MinifySyntax:      true,
-		Loader:            Loader,
+		MinifyWhitespace:  false,
+		MinifyIdentifiers: false,
+		MinifySyntax:      false,
 		Banner: map[string]string{
 			"js": textEncoderPolyfill + processPolyfill + consolePolyfill,
 		},
+		Loader: Loader,
 	})
 
 	if len(opt.Errors) > 0 {
@@ -167,35 +169,43 @@ func BuildServer() (BuildResult, error) {
 	return result, nil
 }
 
-func renderReactToHTMLNew(js string,path string) (string, error) {
-	// save the js to a OutputFiles
-	//
-	// os.WriteFile("server.mjs", []byte(js), 0644)
-	// Create a new QuickJS runtime with module support
-	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
+func renderReactToHTMLNew(js string, path string) (string, error) {
+	// this is just a test purpose
+	os.WriteFile("newJs.js", []byte(js), 0644)
 
+	// Initialize QuickJS runtime with module support
+	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
 	defer rt.Close()
 
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	r1, err := ctx.LoadModule(js, "server")
+	_, err := ctx.LoadModule(js, "server")
 	if err != nil {
-		return "", fmt.Errorf("failed to evaluate module: %w", err)
-	}
-	defer r1.Free()
-
-  // add path to the render function
-	val, err := ctx.Eval(`
-      import {render} from 'server';
-     globalThis.result = render().html;
-  `)
-
-	val.Free()
-	if err != nil {
-		return "", fmt.Errorf("failed to evaluate module: %w", err)
+		panic(err)
 	}
 
-	result := ctx.Globals().Get("result").String()
-	return result, nil
+	opt := quickjs.EvalAwait(true)
+	script := fmt.Sprintf(`
+      globalThis.URL = class {
+          constructor(url) {
+            this.href = url;
+          }
+        };
+        
+      async function start() {
+          try {
+              const { render } = await import("server");
+              const { html } = render("%s");  // Use the dynamic path here
+              globalThis.result = html;
+          } catch (e) {
+              globalThis.result = "Error: " + e.toString();
+          }
+      }
+      start();`, path)
+	_, err = ctx.Eval(script, opt)
+	if err != nil {
+		panic(err)
+	}
+	return ctx.Globals().Get("result").String(), nil
 }
