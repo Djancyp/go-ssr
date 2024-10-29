@@ -1,6 +1,7 @@
 package luna
 
 import (
+	"gobuild/internal"
 	"html/template"
 	"os"
 
@@ -27,20 +28,48 @@ type Cache struct {
 
 type Config struct {
 	ENV         string `default:"development"`
-	FrontendDir string `default:"main.go"`
+	FrontendDir string `default:"frontend"`
+	TailwindCSS bool   `default:"false"`
+	Routes      []internal.ReactRoute
+}
+
+type PropsResponse struct {
+	Path string `json:"path"`
 }
 
 func New(config Config) (*Engine, error) {
 	server := echo.New()
 	server.Static("/assets", "frontend/src/assets/")
+	server.Use(middleware.CORS())
 
 	server.Use(middleware.GzipWithConfig(middleware.GzipConfig{
 		Level: 5,
 	}))
 
+	server.POST("/props", func(c echo.Context) error {
+		// c.bind
+		body := PropsResponse{}
+		if err := c.Bind(&body); err != nil {
+			return err
+		}
+		to := body.Path
+		props := make(map[string]interface{})
+		for _, route := range config.Routes {
+			if matched, params := internal.MatchPath(route.Path, to); matched {
+				if params != nil {
+					props[to] = route.Props(params)
+				} else {
+					props[to] = route.Props()
+				}
+			}
+		}
+		return c.JSON(200, props)
+
+	})
 	return &Engine{
 		Logger: zerolog.New(os.Stdout).With().Timestamp().Logger(),
 		Server: server,
+		Config: config,
 	}, nil
 }
 
@@ -98,25 +127,16 @@ func (e *Engine) Use(m ...echo.MiddlewareFunc) {
 }
 
 func (e *Engine) FrontEnd() {
+
 	e.GET("/*", func(c echo.Context) error {
 		// make sure this is not a static file
 		return e.RenderFrontend(
 			RenderConfig{
 				Title: "Go + React + SSR",
 				Ctx:   c,
-				Props: `{"name": "John Doe"}`,
 			},
 		)
 	})
-}
-
-type Route struct {
-	Path  string
-	Props Props
-}
-type Props struct {
-	Name  string
-	Title string
 }
 
 func (e *Engine) BuildRoutes() {

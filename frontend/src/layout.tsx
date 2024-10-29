@@ -1,16 +1,18 @@
-import { Outlet, Link } from "react-router-dom";
+import { Outlet } from "react-router-dom";
+import { Link } from "./Link";
 function Layout() {
   return (
-    <div>
-      <ul>
+    <div className="bg-black text-white h-screen overflow-hidden">
+      <ul className="flex justify-center border border-gray-800 h-[50px] items-center font-bold">
         <li>
-          <Link to="/">Home</Link>
+          <Link className="px-4 py-2" to="/">
+            Home
+          </Link>
         </li>
         <li>
-          <Link to="/app">About</Link>
+          <Link to="/about">About</Link>
         </li>
       </ul>
-      <h1>App</h1>
       <Outlet />
     </div>
   );

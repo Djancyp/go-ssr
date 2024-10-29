@@ -1,9 +1,10 @@
 package internal
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
-	"os"
+	"regexp"
 	"strings"
 
 	"github.com/buke/quickjs-go"
@@ -22,8 +23,13 @@ type JobRunner struct {
 	Path               string
 	serverRenderResult chan serverRenderResult
 	clientRenderResult chan clientRenderResult
+	Routes             []ReactRoute
 }
 
+type ReactRoute struct {
+	Path  string
+	Props func(params ...map[string]string) map[string]interface{}
+}
 type serverRenderResult struct {
 	html string
 	css  string
@@ -35,11 +41,42 @@ type clientRenderResult struct {
 	err error
 }
 
-func (j *JobRunner) Start() (html *template.Template, body string, css string, js string, err error) {
-	j.serverRenderResult = make(chan serverRenderResult)
-	j.clientRenderResult = make(chan clientRenderResult)
+func MatchPath(routePath, actualPath string) (bool, map[string]string) {
+	// Convert /product/:id to a regex
+	regexPattern := regexp.MustCompile(`:[^/]+`).ReplaceAllString(routePath, `([^/]+)`)
 
-	serverJS, err := BuildServer()
+	// Compile the full regex
+	matched, _ := regexp.MatchString("^"+regexPattern+"$", actualPath)
+	if !matched {
+		return false, nil
+	}
+
+	// Extract parameters using the regex
+	re := regexp.MustCompile("^" + regexPattern + "$")
+	matches := re.FindStringSubmatch(actualPath)
+
+	// Create a map for captured parameters
+	params := make(map[string]string)
+	for i, name := range regexp.MustCompile(`:[^/]+`).FindAllString(routePath, -1) {
+		// Use the parameter name without the ':' character
+		params[name[1:]] = matches[i+1]
+	}
+	return true, params
+}
+func (j *JobRunner) Start() (html *template.Template, body string, css string, js string, err error) {
+	var p map[string]interface{}
+	for _, route := range j.Routes {
+		if matched, params := MatchPath(route.Path, j.Path); matched {
+			if params != nil {
+				p = route.Props(params)
+			} else {
+				p = route.Props()
+			}
+			break
+		}
+	}
+
+	serverJS, err := BuildServer(j.Path, p)
 
 	if err != nil {
 		j.Logger.Error().Err(err).Msg("failed to build server")
@@ -50,7 +87,7 @@ func (j *JobRunner) Start() (html *template.Template, body string, css string, j
 		j.Logger.Error().Err(err).Msg("failed to build client")
 		panic(err)
 	}
-	j.Logger.Info().Msg("server built")
+	clientProps, err := renderReactWithProps(client.JS, p, j.Path)
 
 	ht, err := RenderHTML()
 	if err != nil {
@@ -62,7 +99,7 @@ func (j *JobRunner) Start() (html *template.Template, body string, css string, j
 		j.Logger.Error().Err(err).Msg("failed to render react to html")
 		return nil, "", "", "", err
 	}
-	return ht, serverBody, client.CSS, client.JS, nil
+	return ht, serverBody, client.CSS, clientProps, nil
 }
 
 type BuildResult struct {
@@ -110,7 +147,7 @@ func BuildClient() (BuildResult, error) {
 		Metafile:          false,
 		MinifyWhitespace:  true,
 		MinifyIdentifiers: true,
-		MinifySyntax:      true,
+		MinifySyntax:      false,
 		Loader:            Loader,
 	})
 
@@ -132,7 +169,18 @@ func BuildClient() (BuildResult, error) {
 	return result, nil
 }
 
-func BuildServer() (BuildResult, error) {
+func BuildServer(path string, props map[string]interface{}) (BuildResult, error) {
+
+	jsonProps, error := json.Marshal(props)
+	if error != nil {
+		panic(error)
+	}
+
+	propJs := fmt.Sprintf(`
+  globalThis.props = {'%s':%s};
+  `, path, template.JS(string(jsonProps)))
+	fmt.Println(propJs)
+
 	opt := esbuild.Build(esbuild.BuildOptions{
 		EntryPoints:       []string{"frontend/src/entry-server.tsx"},
 		Bundle:            true,
@@ -146,7 +194,7 @@ func BuildServer() (BuildResult, error) {
 		MinifyIdentifiers: false,
 		MinifySyntax:      false,
 		Banner: map[string]string{
-			"js": textEncoderPolyfill + processPolyfill + consolePolyfill,
+			"js": textEncoderPolyfill + processPolyfill + consolePolyfill + propJs,
 		},
 		Loader: Loader,
 	})
@@ -170,9 +218,6 @@ func BuildServer() (BuildResult, error) {
 }
 
 func renderReactToHTMLNew(js string, path string) (string, error) {
-	// this is just a test purpose
-	os.WriteFile("newJs.js", []byte(js), 0644)
-
 	// Initialize QuickJS runtime with module support
 	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
 	defer rt.Close()
@@ -186,13 +231,19 @@ func renderReactToHTMLNew(js string, path string) (string, error) {
 	}
 
 	opt := quickjs.EvalAwait(true)
+
+	// Print the JSON representation
 	script := fmt.Sprintf(`
       globalThis.URL = class {
           constructor(url) {
             this.href = url;
           }
         };
-        
+        const window = {
+          location: {
+            pathname: "%s"
+          }
+        };
       async function start() {
           try {
               const { render } = await import("server");
@@ -202,10 +253,23 @@ func renderReactToHTMLNew(js string, path string) (string, error) {
               globalThis.result = "Error: " + e.toString();
           }
       }
-      start();`, path)
+      start();`, path, path)
 	_, err = ctx.Eval(script, opt)
 	if err != nil {
 		panic(err)
 	}
 	return ctx.Globals().Get("result").String(), nil
+}
+
+func renderReactWithProps(js string, props map[string]interface{}, path string) (string, error) {
+	jsonProps, error := json.Marshal(props)
+	if error != nil {
+		return js, error
+	}
+	newJs := fmt.Sprintf(`
+  globalThis.props = {'%s':%s};
+  %s
+  `, path, jsonProps, js)
+
+	return newJs, nil
 }

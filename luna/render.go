@@ -10,9 +10,9 @@ import (
 )
 
 type RenderConfig struct {
-	Title string
-	Ctx   echo.Context
-	Props string
+	Title  string
+	Ctx    echo.Context
+	Routes []internal.ReactRoute
 }
 
 func (e *Engine) RenderFrontend(config RenderConfig) error {
@@ -23,6 +23,7 @@ func (e *Engine) RenderFrontend(config RenderConfig) error {
 		ID:     ID,
 		Logger: e.Logger,
 		Path:   config.Ctx.Request().URL.Path,
+		Routes: e.Config.Routes,
 	}
 
 	// check if path is exist in cache
@@ -33,7 +34,6 @@ func (e *Engine) RenderFrontend(config RenderConfig) error {
 				map[string]interface{}{
 					"RenderedContent": template.HTML(c.Body),
 					"JS":              template.JS(c.JS),
-					"InitialProps":    template.JS(fmt.Sprintf(`%s`, config.Props)),
 					"CSS":             template.CSS(c.CSS),
 					"Title":           config.Title,
 				})
@@ -59,7 +59,6 @@ func (e *Engine) RenderFrontend(config RenderConfig) error {
 		map[string]interface{}{
 			"RenderedContent": template.HTML(body),
 			"JS":              template.JS(js),
-			"InitialProps":    template.JS(fmt.Sprintf(`%s`, config.Props)),
 			"CSS":             template.CSS(css),
 			"Title":           config.Title,
 		})

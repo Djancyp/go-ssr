@@ -20,7 +20,6 @@ const templateHTML = `<!doctype html>
     <script type="module">
       {{ .JS }}
     </script>
-    <script id="props">window.APP_PROPS = {{.InitialProps }}</script>
   </body>
 </html>
 `
