@@ -147,7 +147,7 @@ func BuildClient() (BuildResult, error) {
 		Metafile:          false,
 		MinifyWhitespace:  true,
 		MinifyIdentifiers: true,
-		MinifySyntax:      false,
+		MinifySyntax:      true,
 		Loader:            Loader,
 	})
 
